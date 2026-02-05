@@ -75,7 +75,9 @@ CRUISE-001 (.gitignore + project skeleton)
     |               +-- CRUISE-006
     |               +-- CRUISE-009 (Playwright E2E: auth)
     |
-    +-- CRUISE-010 (GitHub Actions CI/CD)
+    +-- CRUISE-004 ──+
+    |                |
+    +-- CRUISE-009 ──+── CRUISE-010 (GitHub Actions CI/CD)
 ```
 
 ---
@@ -1852,7 +1854,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       "id": "CRUISE-010",
       "subject": "GitHub Actions CI/CD workflows",
       "description": "Create .github/workflows/ci.yml with jobs: lint (super-linter v7 for Rust, HTML, CSS, YAML, Markdown, GitHub Actions), dependency-review (dependency-review-action v4, PR only), build (Rust toolchain, cargo cache, cargo build --release, cargo test --lib, upload binary artifact). Create .github/workflows/e2e.yml with job: e2e (Rust build, generate test JWT keys and self-signed CA certificate via generate_keys.sh, Node.js setup, Playwright install, run tests, upload playwright-report and test-results.json as artifacts with retention 30 days). Both triggered on pull_request to main.",
-      "blocked_by": ["CRUISE-001"],
+      "blocked_by": ["CRUISE-001", "CRUISE-004", "CRUISE-009"],
       "complexity": "medium",
       "acceptance_criteria": [
         "ci.yml triggers on pull_request to main",
@@ -1892,7 +1894,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
 **Parallel execution opportunities:**
 - CRUISE-003 and CRUISE-004 can run in parallel (both depend only on CRUISE-002)
 - CRUISE-005 and CRUISE-006 can run in parallel (both depend on CRUISE-003 + CRUISE-004)
-- CRUISE-010 can run in parallel with CRUISE-002 through CRUISE-009 (only depends on CRUISE-001)
+- CRUISE-010 depends on CRUISE-001, CRUISE-004 (for scripts/generate_keys.sh), and CRUISE-009 (for tests/e2e/ directory); ci.yml can be drafted early but e2e.yml requires those artifacts
 
 **Key files to reference:**
 - `src/main.rs` - application entry point, route wiring, state setup
