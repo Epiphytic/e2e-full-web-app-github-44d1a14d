@@ -631,12 +631,19 @@ mkdir -p "$CERT_DIR"
 # Generate RSA private key (no password for dev/test)
 openssl genpkey -algorithm RSA -out "$CERT_DIR/jwt_private.pem" -pkeyopt rsa_keygen_bits:2048
 
-# Extract public key
-openssl rsa -in "$CERT_DIR/jwt_private.pem" -pubout -out "$CERT_DIR/jwt_public.pem"
+# Generate a self-signed CA certificate (valid for 365 days)
+# This satisfies the "local JWT CA with certificate" requirement
+openssl req -new -x509 -key "$CERT_DIR/jwt_private.pem" \
+  -out "$CERT_DIR/jwt_ca.crt" -days 365 \
+  -subj "/CN=Local JWT CA/O=Dev/C=US"
 
-echo "Keys generated in $CERT_DIR/"
-echo "  Private: $CERT_DIR/jwt_private.pem"
-echo "  Public:  $CERT_DIR/jwt_public.pem"
+# Extract public key from the certificate (ensures key and cert are consistent)
+openssl x509 -in "$CERT_DIR/jwt_ca.crt" -pubkey -noout > "$CERT_DIR/jwt_public.pem"
+
+echo "Keys and certificate generated in $CERT_DIR/"
+echo "  Private key:  $CERT_DIR/jwt_private.pem"
+echo "  Certificate:  $CERT_DIR/jwt_ca.crt"
+echo "  Public key:   $CERT_DIR/jwt_public.pem (extracted from certificate)"
 ```
 
 **Step 2: Write failing tests for auth module**
@@ -1702,7 +1709,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     {
       "id": "CRUISE-004",
       "subject": "JWT authentication and JWKS endpoint",
-      "description": "Create src/auth.rs with: Claims struct (sub, exp, iat), validate_token function using RS256, auth_middleware for Axum (checks Authorization header and cookie, with CSRF protection via X-Requested-With header for state-changing requests using cookie auth), build_jwks function that reads RSA public key PEM and returns JWKS JSON, jwks_handler for GET /.well-known/jwks.json. Create scripts/generate_keys.sh that generates RSA 2048 key pair in certs/ directory. Write unit tests for valid token, expired token, invalid token validation, and CSRF header enforcement. Set token cookie with SameSite=Strict, HttpOnly, and Secure attributes.",
+      "description": "Create src/auth.rs with: Claims struct (sub, exp, iat), validate_token function using RS256, auth_middleware for Axum (checks Authorization header and cookie, with CSRF protection via X-Requested-With header for state-changing requests using cookie auth), build_jwks function that reads RSA public key PEM and returns JWKS JSON, jwks_handler for GET /.well-known/jwks.json. Create scripts/generate_keys.sh that generates RSA 2048 key pair with a self-signed CA certificate in certs/ directory (jwt_private.pem, jwt_ca.crt, and jwt_public.pem extracted from the certificate). Write unit tests for valid token, expired token, invalid token validation, and CSRF header enforcement. Set token cookie with SameSite=Strict, HttpOnly, and Secure attributes.",
       "blocked_by": ["CRUISE-002"],
       "complexity": "high",
       "acceptance_criteria": [
@@ -1716,7 +1723,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "auth_middleware allows state-changing requests with Bearer token without CSRF header",
         "token cookie is set with SameSite=Strict, HttpOnly, and Secure attributes",
         "build_jwks returns valid JWKS with RSA key components (n, e)",
-        "scripts/generate_keys.sh generates jwt_private.pem and jwt_public.pem in certs/",
+        "scripts/generate_keys.sh generates jwt_private.pem, jwt_ca.crt (self-signed CA certificate), and jwt_public.pem (extracted from certificate) in certs/",
         "GET /.well-known/jwks.json returns valid JWKS response (not behind auth)",
         "All unit tests pass"
       ],
