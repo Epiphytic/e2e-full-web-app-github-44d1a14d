@@ -9,7 +9,7 @@
 **Tech Stack:**
 - **Backend:** Rust + Axum + sqlx (SQLite) + jsonwebtoken + askama (templates)
 - **Frontend:** HTML + htmx + minimal CSS
-- **Auth:** RS256 JWT with local CA, JWKS endpoint
+- **Auth:** RS256 JWT with local CA, JWKS endpoint, CSRF protection via custom header + SameSite cookies
 - **Testing:** Playwright (Node.js, not Rust) for E2E
 - **CI/CD:** GitHub Actions (super-linter, dependency-review-action, Playwright)
 
@@ -728,6 +728,24 @@ pub async fn auth_middleware(
 
     let token = token.or(cookie_token);
 
+    // CSRF protection: for state-changing requests (POST, PUT, DELETE) that use
+    // cookie-based auth, require a custom header (X-Requested-With) to prevent
+    // cross-site form submissions. Browsers will not send custom headers in
+    // cross-origin requests without CORS preflight approval.
+    let method = req.method().clone();
+    let is_state_changing = method == "POST" || method == "PUT" || method == "DELETE";
+    let has_bearer = req.headers().get("Authorization").is_some();
+
+    if is_state_changing && !has_bearer {
+        let has_csrf_header = req
+            .headers()
+            .get("X-Requested-With")
+            .map_or(false, |v| v == "XMLHttpRequest");
+        if !has_csrf_header {
+            return (StatusCode::FORBIDDEN, "Missing CSRF header (X-Requested-With)").into_response();
+        }
+    }
+
     match token {
         Some(token) => match validate_token(token, &auth.decoding_key) {
             Ok(claims) => {
@@ -794,7 +812,20 @@ Note: `JwksResponse` needs `Clone` derive added for it to work as Axum state. Up
 cargo test --lib auth::tests
 ```
 
-Expected: All 3 tests PASS.
+Expected: All 3 token validation tests PASS.
+
+**Step 5b: Add CSRF protection tests**
+
+Add integration tests (or middleware-level tests) verifying CSRF behavior:
+
+```rust
+// Test: POST request with cookie auth but no X-Requested-With header returns 403
+// Test: POST request with cookie auth and X-Requested-With: XMLHttpRequest succeeds
+// Test: POST request with Bearer token auth (no X-Requested-With) succeeds (no CSRF check for API clients)
+// Test: GET request with cookie auth (no X-Requested-With) succeeds (CSRF only applies to state-changing methods)
+```
+
+These tests ensure the auth_middleware correctly enforces CSRF protection for cookie-authenticated state-changing requests while allowing API clients using Bearer tokens to operate without the custom header.
 
 **Step 6: Commit**
 
@@ -938,7 +969,7 @@ git commit -m "feat: add column modification HTTP handlers"
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
+<body hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
     <nav>
         <h1>SQLite Web Editor</h1>
         <span id="user-info">{% block user_info %}{% endblock %}</span>
@@ -952,7 +983,7 @@ git commit -m "feat: add column modification HTTP handlers"
 
 **Step 2: Create login page**
 
-`templates/login.html` - a page that accepts a JWT token (paste or via cookie). The login form sends the token as a cookie.
+`templates/login.html` - a page that accepts a JWT token (paste or via cookie). The login form sends the token as a cookie with `SameSite=Strict; HttpOnly; Secure` attributes. The server-side handler (or JavaScript on the login page) must set these cookie attributes to prevent CSRF and XSS-based token theft.
 
 **Step 3: Create index/dashboard page**
 
@@ -1590,7 +1621,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     {
       "id": "CRUISE-004",
       "subject": "JWT authentication and JWKS endpoint",
-      "description": "Create src/auth.rs with: Claims struct (sub, exp, iat), validate_token function using RS256, auth_middleware for Axum (checks Authorization header and cookie), build_jwks function that reads RSA public key PEM and returns JWKS JSON, jwks_handler for GET /.well-known/jwks.json. Create scripts/generate_keys.sh that generates RSA 2048 key pair in certs/ directory. Write unit tests for valid token, expired token, and invalid token validation.",
+      "description": "Create src/auth.rs with: Claims struct (sub, exp, iat), validate_token function using RS256, auth_middleware for Axum (checks Authorization header and cookie, with CSRF protection via X-Requested-With header for state-changing requests using cookie auth), build_jwks function that reads RSA public key PEM and returns JWKS JSON, jwks_handler for GET /.well-known/jwks.json. Create scripts/generate_keys.sh that generates RSA 2048 key pair in certs/ directory. Write unit tests for valid token, expired token, invalid token validation, and CSRF header enforcement. Set token cookie with SameSite=Strict, HttpOnly, and Secure attributes.",
       "blocked_by": ["CRUISE-002"],
       "complexity": "high",
       "acceptance_criteria": [
@@ -1600,6 +1631,9 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "auth_middleware extracts token from Authorization: Bearer header",
         "auth_middleware extracts token from cookie named 'token'",
         "auth_middleware returns 401 for missing/invalid token",
+        "auth_middleware returns 403 for state-changing requests (POST/PUT/DELETE) via cookie auth without X-Requested-With header (CSRF protection)",
+        "auth_middleware allows state-changing requests with Bearer token without CSRF header",
+        "token cookie is set with SameSite=Strict, HttpOnly, and Secure attributes",
         "build_jwks returns valid JWKS with RSA key components (n, e)",
         "scripts/generate_keys.sh generates jwt_private.pem and jwt_public.pem in certs/",
         "GET /.well-known/jwks.json returns valid JWKS response (not behind auth)",
@@ -1655,10 +1689,11 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       "complexity": "medium",
       "acceptance_criteria": [
         "base.html includes htmx script tag and CSS link",
+        "base.html body tag includes hx-headers with X-Requested-With: XMLHttpRequest for CSRF protection",
         "index.html shows table list loaded via htmx hx-get on page load",
         "Create table form submits via hx-post and updates table list without page reload",
         "Delete button uses hx-delete and removes table row without page reload",
-        "login.html allows pasting JWT token which gets set as cookie",
+        "login.html sets token cookie with SameSite=Strict, HttpOnly, and Secure attributes",
         "Static files served at /static/ path",
         "CSS provides readable, functional (not necessarily beautiful) styling",
         "App works end-to-end in browser manually"
@@ -1741,7 +1776,8 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     "askama template compilation happens at Rust compile time - template syntax errors show as Rust compile errors which can be confusing",
     "Concurrent SQLite writes in tests could cause 'database is locked' errors if WAL mode is not enabled",
     "htmx partial responses must set correct Content-Type header (text/html) or htmx may not swap properly",
-    "Cookie-based JWT in E2E tests needs correct domain/path matching - 127.0.0.1 vs localhost can cause issues"
+    "Cookie-based JWT in E2E tests needs correct domain/path matching - 127.0.0.1 vs localhost can cause issues",
+    "CSRF protection relies on X-Requested-With custom header and SameSite=Strict cookie; htmx must include hx-headers on body element to send this header with all requests"
   ]
 }
 ```
