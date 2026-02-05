@@ -802,9 +802,29 @@ pub fn build_jwks(public_key_pem: &str) -> Result<JwksResponse, String> {
 pub async fn jwks_handler(State(jwks): State<JwksResponse>) -> Json<JwksResponse> {
     Json(jwks)
 }
+
+/// Sets the JWT token cookie with security flags.
+/// MUST be used by the login handler when setting the `token` cookie.
+pub fn build_auth_cookie(token: &str) -> axum_extra::headers::SetCookie {
+    // HttpOnly: prevents JavaScript access (mitigates XSS token theft)
+    // Secure: cookie only sent over HTTPS (prevents network sniffing)
+    // SameSite=Strict: cookie not sent on cross-site requests (mitigates CSRF)
+    // Path=/: cookie available for all routes
+    format!(
+        "token={}; HttpOnly; Secure; SameSite=Strict; Path=/",
+        token
+    )
+    .parse()
+    .unwrap()
+}
 ```
 
 Note: `JwksResponse` needs `Clone` derive added for it to work as Axum state. Update the struct derives accordingly.
+
+**Important — Cookie Security:** When setting the `token` cookie (in the login handler or via any response), always use `build_auth_cookie()` above, which enforces:
+- **`HttpOnly`** — prevents client-side JavaScript from reading the cookie (mitigates XSS-based token theft)
+- **`Secure`** — ensures the cookie is only transmitted over HTTPS
+- **`SameSite=Strict`** — prevents the browser from sending the cookie with cross-site requests (mitigates CSRF attacks)
 
 **Step 5: Run tests to verify they pass**
 
@@ -983,7 +1003,23 @@ git commit -m "feat: add column modification HTTP handlers"
 
 **Step 2: Create login page**
 
-`templates/login.html` - a page that accepts a JWT token (paste or via cookie). The login form sends the token as a cookie with `SameSite=Strict; HttpOnly; Secure` attributes. The server-side handler (or JavaScript on the login page) must set these cookie attributes to prevent CSRF and XSS-based token theft.
+`templates/login.html` - a page that accepts a JWT token (paste or via cookie). The login form POSTs the token to a server-side login handler, which **must** set the cookie via an HTTP response header using `auth::build_auth_cookie()` to enforce security flags (`HttpOnly`, `Secure`, `SameSite=Strict`). **Do NOT set the cookie via client-side JavaScript** — the `HttpOnly` flag means only the server can set and manage it. Example server-side response in the login handler:
+
+```rust
+use axum::response::{Redirect, IntoResponse};
+use axum::http::header;
+
+pub async fn post_login(Form(form): Form<LoginForm>) -> impl IntoResponse {
+    // After validating the token...
+    let cookie = auth::build_auth_cookie(&form.token);
+    (
+        [(header::SET_COOKIE, cookie.to_string())],
+        Redirect::to("/"),
+    )
+}
+```
+
+This ensures the token cookie is protected against XSS (HttpOnly), network interception (Secure), and CSRF (SameSite=Strict).
 
 **Step 3: Create index/dashboard page**
 
