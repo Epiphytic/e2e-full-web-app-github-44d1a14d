@@ -533,12 +533,53 @@ pub async fn remove_column(pool: &SqlitePool, table_name: &str, column_name: &st
     validate_identifier(table_name)?;
     validate_identifier(column_name)?;
 
-    // SQLite 3.35.0+ supports ALTER TABLE DROP COLUMN
-    let sql = format!("ALTER TABLE \"{}\" DROP COLUMN \"{}\"", table_name, column_name);
-    sqlx::query(&sql)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Use table recreation pattern for broad SQLite version compatibility
+    // (ALTER TABLE DROP COLUMN is only available in SQLite 3.35.0+).
+    // Steps: get current columns, filter out the target, recreate the table.
+    let current_columns = get_columns(pool, table_name).await?;
+    let remaining_columns: Vec<&ColumnDef> = current_columns
+        .iter()
+        .filter(|c| c.name != column_name)
+        .collect();
+
+    if remaining_columns.len() == current_columns.len() {
+        return Err(format!("Column '{}' not found in table '{}'", column_name, table_name));
+    }
+    if remaining_columns.is_empty() {
+        return Err("Cannot remove the last column from a table".into());
+    }
+
+    let tmp_table = format!("{}_backup", table_name);
+    let col_names: Vec<String> = remaining_columns.iter().map(|c| format!("\"{}\"", c.name)).collect();
+    let col_defs: Vec<String> = remaining_columns
+        .iter()
+        .map(|c| format!("\"{}\" {}", c.name, c.col_type.to_uppercase()))
+        .collect();
+    let col_list = col_names.join(", ");
+
+    // Wrap in a transaction for atomicity
+    let sql = format!(
+        "CREATE TABLE \"{tmp}\" ({defs}); \
+         INSERT INTO \"{tmp}\" ({cols}) SELECT {cols} FROM \"{orig}\"; \
+         DROP TABLE \"{orig}\"; \
+         ALTER TABLE \"{tmp}\" RENAME TO \"{orig}\";",
+        tmp = tmp_table,
+        defs = col_defs.join(", "),
+        cols = col_list,
+        orig = table_name,
+    );
+
+    // Execute each statement separately since sqlx doesn't support multi-statement queries
+    let create_sql = format!("CREATE TABLE \"{}\" ({})", tmp_table, col_defs.join(", "));
+    let insert_sql = format!("INSERT INTO \"{}\" ({}) SELECT {} FROM \"{}\"", tmp_table, col_list, col_list, table_name);
+    let drop_sql = format!("DROP TABLE \"{}\"", table_name);
+    let rename_sql = format!("ALTER TABLE \"{}\" RENAME TO \"{}\"", tmp_table, table_name);
+
+    sqlx::query(&create_sql).execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(&insert_sql).execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(&drop_sql).execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(&rename_sql).execute(pool).await.map_err(|e| e.to_string())?;
+
     Ok(())
 }
 ```
@@ -1650,7 +1691,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "drop_table removes table",
         "get_columns returns correct column names and types",
         "add_column adds column to existing table",
-        "remove_column removes column (uses ALTER TABLE DROP COLUMN)",
+        "remove_column removes column (uses table recreation pattern for broad SQLite version compatibility)",
         "SQL injection in table/column names is rejected",
         "All 7+ unit tests pass with cargo test --lib db::tests"
       ],
@@ -1809,7 +1850,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     }
   ],
   "risks": [
-    "SQLite ALTER TABLE DROP COLUMN requires SQLite 3.35.0+; sqlx bundles its own SQLite but version must be verified during CRUISE-003",
+    "SQLite ALTER TABLE DROP COLUMN requires SQLite 3.35.0+; the remove_column implementation uses the table recreation pattern (create backup, copy data, drop original, rename) to ensure compatibility with all SQLite versions",
     "Playwright webServer config starts cargo run which compiles from source in CI - this could timeout; may need to use pre-built binary instead",
     "JWT key generation in CI creates ephemeral keys - tests must not depend on specific key material",
     "Super-linter may flag htmx attributes (hx-get, hx-post, etc.) as invalid HTML attributes; may need to configure HTML linter exceptions",
