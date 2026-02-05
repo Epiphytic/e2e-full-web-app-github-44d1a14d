@@ -9,7 +9,7 @@
 **Tech Stack:**
 - **Backend:** Rust + Axum + sqlx (SQLite) + jsonwebtoken + askama (templates)
 - **Frontend:** HTML + htmx + minimal CSS
-- **Auth:** RS256 JWT with local CA, JWKS endpoint, CSRF protection via custom header + SameSite cookies
+- **Auth:** RS256 JWT with local CA, JWKS endpoint, CSRF protection via custom header + cookie security flags (`HttpOnly`, `Secure`, `SameSite=Strict`)
 - **Testing:** Playwright (Node.js, not Rust) for E2E
 - **CI/CD:** GitHub Actions (super-linter, dependency-review-action, Playwright)
 
@@ -44,7 +44,7 @@ E2E tests use Playwright (Node.js) to test the full flow: login with a short-liv
 
 7. **Column type handling** - Need to define a supported set of SQLite column types for the UI and validate user input server-side to prevent SQL injection.
 
-8. **CSRF protection for cookie-based auth** - htmx applications that rely on cookies for authentication are vulnerable to CSRF attacks. The implementation uses a multi-layer defense: (a) `SameSite=Strict` on the `token` cookie via `build_auth_cookie()` prevents cross-site cookie transmission, (b) the `auth_middleware` requires a custom `X-Requested-With: XMLHttpRequest` header on all state-changing requests (POST/PUT/DELETE) when using cookie auth — browsers block custom headers on cross-origin requests without CORS preflight, and (c) the `base.html` template sets `hx-headers='{"X-Requested-With": "XMLHttpRequest"}'` on the `<body>` tag so htmx automatically includes this header. See Task CRUISE-004 Step 5b for CSRF-specific tests.
+8. **Cookie security and CSRF protection** - The `token` cookie MUST always be set via `build_auth_cookie()` (see CRUISE-004), which enforces three critical security flags: `HttpOnly` (prevents XSS-based token theft via JavaScript), `Secure` (ensures HTTPS-only transmission), and `SameSite=Strict` (prevents cross-site cookie transmission). **Never set the token cookie via client-side JavaScript or without these flags.** Additionally, the implementation uses a multi-layer CSRF defense: (a) `SameSite=Strict` prevents cross-site cookie transmission, (b) the `auth_middleware` requires a custom `X-Requested-With: XMLHttpRequest` header on all state-changing requests (POST/PUT/DELETE) when using cookie auth — browsers block custom headers on cross-origin requests without CORS preflight, and (c) the `base.html` template sets `hx-headers='{"X-Requested-With": "XMLHttpRequest"}'` on the `<body>` tag so htmx automatically includes this header. See Task CRUISE-004 Step 5b for CSRF-specific tests.
 
 ---
 
@@ -715,7 +715,9 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
 
-    // Also check for token in cookie
+    // Also check for token in cookie.
+    // NOTE: The token cookie MUST be set with HttpOnly, Secure, and SameSite=Strict
+    // flags — see build_auth_cookie() below for the canonical cookie builder.
     let cookie_token = req
         .headers()
         .get("Cookie")
