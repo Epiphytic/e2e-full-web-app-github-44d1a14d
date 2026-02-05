@@ -987,6 +987,8 @@ git commit -m "feat: add table CRUD HTTP handlers"
 
 ### Task CRUISE-006: Column Modification Handlers
 
+**Depends on:** CRUISE-003 (DB layer), CRUISE-004 (auth), CRUISE-008 (column management Askama templates — required at compile time)
+
 **Files:**
 - Modify: `src/handlers.rs` (add column endpoints)
 - Modify: `src/main.rs` (add column routes)
