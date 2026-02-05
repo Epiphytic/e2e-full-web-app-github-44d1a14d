@@ -30,7 +30,7 @@ E2E tests use Playwright (Node.js) to test the full flow: login with a short-liv
 
 ## Risk Areas
 
-1. **SQLite ALTER TABLE limitations** - SQLite cannot drop columns in older versions (pre-3.35.0). The implementation must handle this by recreating tables when removing columns. Need to verify the SQLite version bundled with sqlx.
+1. **SQLite ALTER TABLE limitations** - `ALTER TABLE DROP COLUMN` is only available in SQLite 3.35.0+, and the bundled SQLite version in sqlx may vary. To ensure broad compatibility, the `remove_column` implementation in CRUISE-003 uses the **table recreation pattern** (create backup table with remaining columns, copy data, drop original, rename backup) instead of `ALTER TABLE DROP COLUMN`. This approach works with all SQLite versions.
 
 2. **JWT key management in CI** - The local CA private key must exist at build/test time but must never be committed. CI needs a step to generate ephemeral keys for testing.
 
@@ -533,9 +533,10 @@ pub async fn remove_column(pool: &SqlitePool, table_name: &str, column_name: &st
     validate_identifier(table_name)?;
     validate_identifier(column_name)?;
 
-    // Use table recreation pattern for broad SQLite version compatibility
-    // (ALTER TABLE DROP COLUMN is only available in SQLite 3.35.0+).
-    // Steps: get current columns, filter out the target, recreate the table.
+    // IMPORTANT: Do NOT use ALTER TABLE DROP COLUMN — it requires SQLite 3.35.0+
+    // and the sqlx-bundled version may be older. Instead, use the table recreation
+    // pattern for broad compatibility: get current columns, filter out the target,
+    // create a new table, copy data, drop the original, and rename.
     let current_columns = get_columns(pool, table_name).await?;
     let remaining_columns: Vec<&ColumnDef> = current_columns
         .iter()
