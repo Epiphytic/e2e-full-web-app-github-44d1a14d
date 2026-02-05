@@ -57,15 +57,15 @@ CRUISE-001 (.gitignore + project skeleton)
     |       |
     |       +-- CRUISE-003 (SQLite DB layer)
     |       |       |
-    |       |       +-- CRUISE-005 (Table CRUD handlers)
+    |       |       +-- CRUISE-007 (htmx table management UI / Askama templates)
     |       |       |       |
-    |       |       |       +-- CRUISE-007 (htmx table management UI)
+    |       |       |       +-- CRUISE-005 (Table CRUD handlers)
     |       |       |       |       |
     |       |       |       |       +-- CRUISE-009 (Playwright E2E: tables)
     |       |       |       |
-    |       |       +-- CRUISE-006 (Column modification handlers)
+    |       |       +-- CRUISE-008 (htmx column management UI / Askama templates)
     |       |               |
-    |       |               +-- CRUISE-008 (htmx column management UI)
+    |       |               +-- CRUISE-006 (Column modification handlers)
     |       |                       |
     |       |                       +-- CRUISE-009
     |       |
@@ -1637,19 +1637,19 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     },
     {
       "id": "SPAWN-004",
-      "name": "HTTP Handlers",
+      "name": "Frontend Templates and htmx (must run before handlers)",
+      "use_spawn_team": true,
+      "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep --timeout 480",
+      "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      "task_ids": ["CRUISE-007", "CRUISE-008"]
+    },
+    {
+      "id": "SPAWN-005",
+      "name": "HTTP Handlers (requires templates from SPAWN-004)",
       "use_spawn_team": true,
       "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep --timeout 600",
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       "task_ids": ["CRUISE-005", "CRUISE-006"]
-    },
-    {
-      "id": "SPAWN-005",
-      "name": "Frontend Templates and htmx",
-      "use_spawn_team": false,
-      "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep --timeout 480",
-      "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-      "task_ids": ["CRUISE-007", "CRUISE-008"]
     },
     {
       "id": "SPAWN-006",
@@ -1749,7 +1749,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       "id": "CRUISE-005",
       "subject": "Table CRUD HTTP handlers",
       "description": "Create src/handlers.rs with Axum handlers: index (GET / - full page), list_tables (GET /api/tables - htmx partial), create_table (POST /api/tables - form data), delete_table (DELETE /api/tables/:name). Each handler uses db module functions. Protected routes require auth. Handlers return HTML fragments for htmx swap. Wire routes into main.rs with auth middleware layer.",
-      "blocked_by": ["CRUISE-003", "CRUISE-004"],
+      "blocked_by": ["CRUISE-003", "CRUISE-004", "CRUISE-007"],
       "complexity": "medium",
       "acceptance_criteria": [
         "GET / returns full HTML page (behind auth)",
@@ -1764,13 +1764,13 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep",
-      "spawn_instance": "SPAWN-004"
+      "spawn_instance": "SPAWN-005"
     },
     {
       "id": "CRUISE-006",
       "subject": "Column modification HTTP handlers",
       "description": "Add to src/handlers.rs: list_columns (GET /api/tables/:name/columns), add_column (POST /api/tables/:name/columns), remove_column (DELETE /api/tables/:name/columns/:col), table_detail (GET /tables/:name - full page). Wire column routes into main.rs. Each returns htmx-compatible HTML fragments.",
-      "blocked_by": ["CRUISE-003", "CRUISE-004"],
+      "blocked_by": ["CRUISE-003", "CRUISE-004", "CRUISE-008"],
       "complexity": "medium",
       "acceptance_criteria": [
         "GET /api/tables/:name/columns returns column list HTML partial",
@@ -1784,13 +1784,13 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep",
-      "spawn_instance": "SPAWN-004"
+      "spawn_instance": "SPAWN-005"
     },
     {
       "id": "CRUISE-007",
       "subject": "htmx frontend - table management UI",
-      "description": "Create askama templates: base.html (includes htmx 2.0.4 CDN, CSS link, nav), login.html (JWT token input form), index.html (extends base, table list with hx-get, create table form, delete buttons). Create partials: table_list.html, table_row.html, create_table_form.html. Create static/css/style.css with minimal styling. Configure static file serving via tower-http ServeDir in main.rs.",
-      "blocked_by": ["CRUISE-005"],
+      "description": "Create askama templates: base.html (includes htmx 2.0.4 CDN, CSS link, nav), login.html (JWT token input form), index.html (extends base, table list with hx-get, create table form, delete buttons). Create partials: table_list.html, table_row.html, create_table_form.html. Create static/css/style.css with minimal styling. Configure static file serving via tower-http ServeDir in main.rs. NOTE: Askama templates are compiled at Rust build time, so these templates must exist before handler code (CRUISE-005) can compile.",
+      "blocked_by": ["CRUISE-003"],
       "complexity": "medium",
       "acceptance_criteria": [
         "base.html includes htmx script tag and CSS link",
@@ -1805,13 +1805,13 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep",
-      "spawn_instance": "SPAWN-005"
+      "spawn_instance": "SPAWN-004"
     },
     {
       "id": "CRUISE-008",
       "subject": "htmx frontend - column management UI",
-      "description": "Create templates: table_detail.html (extends base, column list with hx-get, add column form, remove buttons, back link). Create partials: column_list.html, column_row.html, add_column_form.html. Column type uses dropdown with allowed types (INTEGER, TEXT, REAL, BLOB, NUMERIC). Wire table_detail handler into routes.",
-      "blocked_by": ["CRUISE-006", "CRUISE-007"],
+      "description": "Create templates: table_detail.html (extends base, column list with hx-get, add column form, remove buttons, back link). Create partials: column_list.html, column_row.html, add_column_form.html. Column type uses dropdown with allowed types (INTEGER, TEXT, REAL, BLOB, NUMERIC). Wire table_detail handler into routes. NOTE: Askama templates are compiled at Rust build time, so these templates must exist before handler code (CRUISE-006) can compile.",
+      "blocked_by": ["CRUISE-007"],
       "complexity": "medium",
       "acceptance_criteria": [
         "Table detail page shows table name and column list",
@@ -1824,13 +1824,13 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       "cli_params": "claude --model sonnet --allowedTools Read,Write,Edit,Bash,Glob,Grep",
-      "spawn_instance": "SPAWN-005"
+      "spawn_instance": "SPAWN-004"
     },
     {
       "id": "CRUISE-009",
       "subject": "Playwright E2E tests",
       "description": "Create Node.js Playwright test suite in tests/e2e/. Install @playwright/test and jsonwebtoken. Create playwright.config.ts with webServer pointing to cargo run. Create JWT helper that generates tokens from certs/jwt_private.pem. Write tests: auth.spec.ts (valid token access, expired token rejection, missing token rejection, JWKS endpoint validation), tables.spec.ts (create table, delete table), columns.spec.ts (add column, remove column). Configure HTML and JSON reporters.",
-      "blocked_by": ["CRUISE-004", "CRUISE-007", "CRUISE-008"],
+      "blocked_by": ["CRUISE-004", "CRUISE-005", "CRUISE-006"],
       "complexity": "high",
       "acceptance_criteria": [
         "npm ci installs all dependencies",
@@ -1878,7 +1878,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     "Playwright webServer config starts cargo run which compiles from source in CI - this could timeout; may need to use pre-built binary instead",
     "JWT key and certificate generation in CI creates ephemeral keys and a self-signed CA certificate - tests must not depend on specific key material",
     "Super-linter may flag htmx attributes (hx-get, hx-post, etc.) as invalid HTML attributes; may need to configure HTML linter exceptions",
-    "askama template compilation happens at Rust compile time - template syntax errors show as Rust compile errors which can be confusing",
+    "askama template compilation happens at Rust compile time - template files must exist before handler code can compile; this is why CRUISE-007/008 (templates) must complete before CRUISE-005/006 (handlers). Template syntax errors show as Rust compile errors which can be confusing",
     "Concurrent SQLite writes in tests could cause 'database is locked' errors if WAL mode is not enabled",
     "htmx partial responses must set correct Content-Type header (text/html) or htmx may not swap properly",
     "Cookie-based JWT in E2E tests needs correct domain/path matching - 127.0.0.1 vs localhost can cause issues",
@@ -1893,7 +1893,8 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
 
 **Parallel execution opportunities:**
 - CRUISE-003 and CRUISE-004 can run in parallel (both depend only on CRUISE-002)
-- CRUISE-005 and CRUISE-006 can run in parallel (both depend on CRUISE-003 + CRUISE-004)
+- CRUISE-007 and CRUISE-008 (Askama templates) must complete before CRUISE-005 and CRUISE-006 (handlers), because Askama compiles templates at Rust build time — handlers cannot compile without templates existing. CRUISE-007 and CRUISE-008 can run in parallel with CRUISE-004
+- CRUISE-005 and CRUISE-006 can run in parallel (both depend on CRUISE-003 + CRUISE-004 + their respective templates CRUISE-007/CRUISE-008)
 - CRUISE-010 depends on CRUISE-001, CRUISE-004 (for scripts/generate_keys.sh), and CRUISE-009 (for tests/e2e/ directory); ci.yml can be drafted early but e2e.yml requires those artifacts
 
 **Key files to reference:**
