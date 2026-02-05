@@ -32,7 +32,7 @@ E2E tests use Playwright (Node.js) to test the full flow: login with a short-liv
 
 1. **SQLite ALTER TABLE limitations** - `ALTER TABLE DROP COLUMN` is only available in SQLite 3.35.0+, and the bundled SQLite version in sqlx may vary. To ensure broad compatibility, the `remove_column` implementation in CRUISE-003 uses the **table recreation pattern** (create backup table with remaining columns, copy data, drop original, rename backup) instead of `ALTER TABLE DROP COLUMN`. This approach works with all SQLite versions.
 
-2. **JWT key management in CI** - The local CA private key must exist at build/test time but must never be committed. CI needs a step to generate ephemeral keys for testing.
+2. **JWT key management in CI** - The local CA private key and self-signed certificate must exist at build/test time but must never be committed. CI needs a step to generate ephemeral keys and certificates for testing via `scripts/generate_keys.sh`.
 
 3. **Playwright + Rust integration** - Playwright is Node.js-based. The E2E test setup must start the Rust server as a subprocess, wait for it to be ready, then run Playwright tests. This requires careful process lifecycle management.
 
@@ -1547,7 +1547,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Generate test JWT keys
+      - name: Generate test JWT keys and CA certificate
         run: |
           chmod +x scripts/generate_keys.sh
           ./scripts/generate_keys.sh
@@ -1851,7 +1851,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
     {
       "id": "CRUISE-010",
       "subject": "GitHub Actions CI/CD workflows",
-      "description": "Create .github/workflows/ci.yml with jobs: lint (super-linter v7 for Rust, HTML, CSS, YAML, Markdown, GitHub Actions), dependency-review (dependency-review-action v4, PR only), build (Rust toolchain, cargo cache, cargo build --release, cargo test --lib, upload binary artifact). Create .github/workflows/e2e.yml with job: e2e (Rust build, generate test keys, Node.js setup, Playwright install, run tests, upload playwright-report and test-results.json as artifacts with retention 30 days). Both triggered on pull_request to main.",
+      "description": "Create .github/workflows/ci.yml with jobs: lint (super-linter v7 for Rust, HTML, CSS, YAML, Markdown, GitHub Actions), dependency-review (dependency-review-action v4, PR only), build (Rust toolchain, cargo cache, cargo build --release, cargo test --lib, upload binary artifact). Create .github/workflows/e2e.yml with job: e2e (Rust build, generate test JWT keys and self-signed CA certificate via generate_keys.sh, Node.js setup, Playwright install, run tests, upload playwright-report and test-results.json as artifacts with retention 30 days). Both triggered on pull_request to main.",
       "blocked_by": ["CRUISE-001"],
       "complexity": "medium",
       "acceptance_criteria": [
@@ -1860,7 +1860,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "Dependency review job uses actions/dependency-review-action@v4",
         "Build job compiles Rust and runs unit tests",
         "e2e.yml triggers on pull_request to main",
-        "E2E job generates ephemeral JWT keys for testing",
+        "E2E job generates ephemeral JWT keys and self-signed CA certificate for testing",
         "E2E job installs Playwright with chromium",
         "E2E job uploads playwright-report/ as artifact (if: always())",
         "E2E job uploads test-results.json as artifact (if: always())",
@@ -1874,7 +1874,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
   "risks": [
     "SQLite ALTER TABLE DROP COLUMN requires SQLite 3.35.0+; the remove_column implementation uses the table recreation pattern (create backup, copy data, drop original, rename) to ensure compatibility with all SQLite versions",
     "Playwright webServer config starts cargo run which compiles from source in CI - this could timeout; may need to use pre-built binary instead",
-    "JWT key generation in CI creates ephemeral keys - tests must not depend on specific key material",
+    "JWT key and certificate generation in CI creates ephemeral keys and a self-signed CA certificate - tests must not depend on specific key material",
     "Super-linter may flag htmx attributes (hx-get, hx-post, etc.) as invalid HTML attributes; may need to configure HTML linter exceptions",
     "askama template compilation happens at Rust compile time - template syntax errors show as Rust compile errors which can be confusing",
     "Concurrent SQLite writes in tests could cause 'database is locked' errors if WAL mode is not enabled",
