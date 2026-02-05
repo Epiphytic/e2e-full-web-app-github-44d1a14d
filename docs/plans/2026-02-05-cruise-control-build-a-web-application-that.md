@@ -44,6 +44,8 @@ E2E tests use Playwright (Node.js) to test the full flow: login with a short-liv
 
 7. **Column type handling** - Need to define a supported set of SQLite column types for the UI and validate user input server-side to prevent SQL injection.
 
+8. **CSRF protection for cookie-based auth** - htmx applications that rely on cookies for authentication are vulnerable to CSRF attacks. The implementation uses a multi-layer defense: (a) `SameSite=Strict` on the `token` cookie via `build_auth_cookie()` prevents cross-site cookie transmission, (b) the `auth_middleware` requires a custom `X-Requested-With: XMLHttpRequest` header on all state-changing requests (POST/PUT/DELETE) when using cookie auth — browsers block custom headers on cross-origin requests without CORS preflight, and (c) the `base.html` template sets `hx-headers='{"X-Requested-With": "XMLHttpRequest"}'` on the `<body>` tag so htmx automatically includes this header. See Task CRUISE-004 Step 5b for CSRF-specific tests.
+
 ---
 
 ## Task Dependency Graph
