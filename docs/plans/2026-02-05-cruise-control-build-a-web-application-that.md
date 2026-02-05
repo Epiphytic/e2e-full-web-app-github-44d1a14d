@@ -924,13 +924,20 @@ Create `src/handlers.rs` with Axum handlers that:
 - Each handler calls the corresponding `db::` function
 - Each handler returns appropriate htmx-compatible HTML fragments
 
+**Important — CSRF Protection for State-Changing Endpoints:** All POST/DELETE handlers (create_table, delete_table, add_column, remove_column) are protected against CSRF attacks by the auth middleware layer (see CRUISE-004, Step 4). The middleware enforces two layers of defense:
+1. **`SameSite=Strict` cookie flag** — prevents the browser from sending the `token` cookie on cross-site requests (set via `build_auth_cookie()`).
+2. **Custom `X-Requested-With: XMLHttpRequest` header requirement** — the auth middleware rejects state-changing requests (POST/PUT/DELETE) that use cookie-based auth but lack this header (returns 403). Since browsers do not allow cross-origin requests to set custom headers without CORS preflight approval, this blocks CSRF even if `SameSite` is not supported. The htmx frontend includes this header automatically via `hx-headers` on the `<body>` tag (see CRUISE-007).
+
+Integration tests for CSRF enforcement are in CRUISE-004, Step 5b. Handler integration tests below should also include the `X-Requested-With` header on all POST/DELETE requests to pass CSRF validation.
+
 **Step 2: Write integration tests**
 
 Test each handler using `axum::test` helpers or `reqwest` against a running test server:
 - Test that listing tables on empty DB returns empty list
-- Test creating a table via POST returns success
+- Test creating a table via POST returns success (include `X-Requested-With: XMLHttpRequest` header)
 - Test listing tables after creation shows the new table
-- Test deleting a table via DELETE removes it
+- Test deleting a table via DELETE removes it (include `X-Requested-With: XMLHttpRequest` header)
+- Test that POST/DELETE requests without `X-Requested-With` header are rejected with 403 (CSRF protection)
 
 **Step 3: Implement handlers**
 
@@ -980,8 +987,8 @@ git commit -m "feat: add table CRUD HTTP handlers"
 **Step 1: Write failing tests for column handlers**
 
 - Test `GET /api/tables/:name/columns` returns column list
-- Test `POST /api/tables/:name/columns` adds a column
-- Test `DELETE /api/tables/:name/columns/:col` removes a column
+- Test `POST /api/tables/:name/columns` adds a column (include `X-Requested-With: XMLHttpRequest` header for CSRF)
+- Test `DELETE /api/tables/:name/columns/:col` removes a column (include `X-Requested-With: XMLHttpRequest` header for CSRF)
 
 **Step 2: Implement column handlers**
 
@@ -1744,6 +1751,8 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "DELETE /api/tables/:name drops table and returns updated table list",
         "All endpoints return proper HTTP status codes (200, 201, 404, 500)",
         "Routes are protected by auth middleware (except /.well-known/jwks.json)",
+        "POST/DELETE requests without X-Requested-With header are rejected with 403 (CSRF protection via auth middleware)",
+        "Integration tests include X-Requested-With: XMLHttpRequest header on state-changing requests",
         "Integration tests pass"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
@@ -1763,6 +1772,7 @@ git commit -m "feat: add GitHub Actions workflows for CI and E2E tests"
         "GET /tables/:name returns full table detail page",
         "Returns 404 if table doesn't exist",
         "All endpoints protected by auth",
+        "POST/DELETE requests without X-Requested-With header are rejected with 403 (CSRF protection via auth middleware)",
         "Integration tests pass"
       ],
       "permissions": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
