@@ -946,6 +946,7 @@ Each handler should:
 2. Call the db function
 3. Return an HTML fragment (for htmx `hx-swap`)
 4. Include proper error responses (4xx/5xx with error HTML)
+5. If setting the `token` cookie (e.g. `post_login`), use `auth::build_auth_cookie()` to ensure `HttpOnly`, `Secure`, and `SameSite=Strict` flags are always present — never construct the `Set-Cookie` header manually
 
 **Step 4: Wire routes into main.rs**
 
@@ -953,6 +954,7 @@ Each handler should:
 // In main.rs, after creating the pool and auth state:
 let app = Router::new()
     .route("/.well-known/jwks.json", get(auth::jwks_handler))
+    .route("/login", get(handlers::get_login).post(handlers::post_login))
     .route("/", get(handlers::index))
     .route("/api/tables", get(handlers::list_tables).post(handlers::create_table))
     .route("/api/tables/:name", delete(handlers::delete_table))
@@ -960,6 +962,8 @@ let app = Router::new()
     .layer(middleware::from_fn_with_state(auth_state.clone(), auth::auth_middleware))
     .with_state(app_state);
 ```
+
+**Security Note — Login Handler Cookie:** The `post_login` handler **must** set the `token` cookie using `auth::build_auth_cookie()`, which enforces `HttpOnly` (prevents XSS theft of the token), `Secure` (HTTPS-only transmission), and `SameSite=Strict` (CSRF mitigation). The cookie must **never** be set via client-side JavaScript or without these flags. See CRUISE-004 Step 4 and CRUISE-007 Step 2 for the canonical implementation.
 
 **Step 5: Run tests**
 
